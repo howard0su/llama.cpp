@@ -50,6 +50,15 @@ static LONG atomic_fetch_sub(atomic_int* ptr, LONG dec) {
     return atomic_fetch_add(ptr, -(dec));
 }
 
+#ifdef USE_NEW_DISTRIBUTE
+#define MULTI_THREAD_FOR(nr) for(int i1=params->ith; i1 < (nr); i1 += params->nth)
+#else
+#define MULTI_THREAD_FOR(nr) \
+    const int _dr = ((nr) + params->nth - 1)/params->nth; \
+    const int _ir0 = _dr*params->ith; \
+    const int _ir1 = MIN(_ir0 + _dr, (nr)); \
+    for(int i1=_ir0; i1 < _ir1; i1 ++)
+#endif
 typedef HANDLE pthread_t;
 
 typedef DWORD thread_ret_t;
@@ -5075,14 +5084,11 @@ static void ggml_compute_forward_add_f32(
     GGML_ASSERT(nb00 == sizeof(float));
 
     if (nb10 == sizeof(float)) {
-        const int j0 = (n/nth)*ith;
-        const int j1 = ith == nth - 1 ? n : (n/nth)*(ith + 1);
-
-        for (int j = j0; j < j1; j++) {
+            MULTI_THREAD_FOR(n) {
             ggml_vec_add_f32(nc,
-                    (float *) ((char *) dst->data  + j*nb1),
-                    (float *) ((char *) src0->data + j*nb01),
-                    (float *) ((char *) src1->data + j*nb11));
+                    (float *) ((char *) dst->data  + i1*nb1),
+                    (float *) ((char *) src0->data + i1*nb01),
+                    (float *) ((char *) src1->data + i1*nb11));
         }
     } else {
         // src1 is not contiguous
@@ -5826,20 +5832,10 @@ static void ggml_compute_forward_gelu_f32(
         return;
     }
 
-    const int ith = params->ith;
-    const int nth = params->nth;
-
     const int nc = src0->ne[0];
     const int nr = ggml_nrows(src0);
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
-    for (int i1 = ir0; i1 < ir1; i1++) {
+    MULTI_THREAD_FOR(nr) {
         ggml_vec_gelu_f32(nc,
                 (float *) ((char *) dst->data  + i1*( dst->nb[1])),
                 (float *) ((char *) src0->data + i1*(src0->nb[1])));
@@ -5893,20 +5889,10 @@ static void ggml_compute_forward_silu_f32(
         return;
     }
 
-    const int ith = params->ith;
-    const int nth = params->nth;
-
     const int nc = src0->ne[0];
     const int nr = ggml_nrows(src0);
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
-    for (int i1 = ir0; i1 < ir1; i1++) {
+    MULTI_THREAD_FOR(nr) {
         ggml_vec_silu_f32(nc,
                 (float *) ((char *) dst->data  + i1*( dst->nb[1])),
                 (float *) ((char *) src0->data + i1*(src0->nb[1])));
@@ -6259,18 +6245,11 @@ static void ggml_compute_forward_mul_mat_f32(
     // total rows in src0
     const int nr = ne01*ne02*ne03;
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
-    for (int ir = ir0; ir < ir1; ++ir) {
+    MULTI_THREAD_FOR(nr) {
         // src0 indices
-        const int i03 = ir/(ne02*ne01);
-        const int i02 = (ir - i03*ne02*ne01)/ne01;
-        const int i01 = (ir - i03*ne02*ne01 - i02*ne01);
+        const int i03 = i1/(ne02*ne01);
+        const int i02 = (i1 - i03*ne02*ne01)/ne01;
+        const int i01 = (i1 - i03*ne02*ne01 - i02*ne01);
 
         for (int ic = 0; ic < ne11; ++ic) {
             // src1 indices
@@ -6343,9 +6322,6 @@ static void ggml_compute_forward_mul_mat_f16_f32(
     const int nb1  = dst->nb[1];
     const int nb2  = dst->nb[2];
     const int nb3  = dst->nb[3];
-
-    const int ith = params->ith;
-    const int nth = params->nth;
 
     GGML_ASSERT(ne02 == ne12);
     GGML_ASSERT(ne03 == ne13);
@@ -6450,20 +6426,13 @@ static void ggml_compute_forward_mul_mat_f16_f32(
     // total rows in src0
     const int nr = ne01*ne02*ne03;
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
     ggml_fp16_t * wdata = params->wdata;
 
-    for (int ir = ir0; ir < ir1; ++ir) {
+    MULTI_THREAD_FOR(nr) {
         // src0 indices
-        const int i03 = ir/(ne02*ne01);
-        const int i02 = (ir - i03*ne02*ne01)/ne01;
-        const int i01 = (ir - i03*ne02*ne01 - i02*ne01);
+        const int i03 = i1/(ne02*ne01);
+        const int i02 = (i1 - i03*ne02*ne01)/ne01;
+        const int i01 = (i1 - i03*ne02*ne01 - i02*ne01);
 
         const int i13 = i03;
         const int i12 = i02;
@@ -6555,9 +6524,6 @@ static void ggml_compute_forward_mul_mat_q_f32(
     const int nb1  = dst->nb[1];
     const int nb2  = dst->nb[2];
     const int nb3  = dst->nb[3];
-
-    const int ith = params->ith;
-    const int nth = params->nth;
 
     GGML_ASSERT(ne02 == ne12);
     GGML_ASSERT(ne03 == ne13);
@@ -6658,21 +6624,14 @@ static void ggml_compute_forward_mul_mat_q_f32(
     // total rows in src0
     const int nr = ne01*ne02*ne03;
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
     void * wdata = params->wdata;
     const size_t row_size = ne00*GGML_TYPE_SIZE[type]/GGML_BLCK_SIZE[type];
 
-    for (int ir = ir0; ir < ir1; ++ir) {
+    MULTI_THREAD_FOR(nr) {
         // src0 indices
-        const int i03 = ir/(ne02*ne01);
-        const int i02 = (ir - i03*ne02*ne01)/ne01;
-        const int i01 = (ir - i03*ne02*ne01 - i02*ne01);
+        const int i03 = i1/(ne02*ne01);
+        const int i02 = (i1 - i03*ne02*ne01)/ne01;
+        const int i01 = (i1 - i03*ne02*ne01 - i02*ne01);
 
         const int i13 = i03;
         const int i12 = i02;
@@ -6788,14 +6747,7 @@ static void ggml_compute_forward_scale_f32(
     const int nc = src0->ne[0];
     const int nr = ggml_nrows(src0);
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
-    for (int i1 = ir0; i1 < ir1; i1++) {
+    MULTI_THREAD_FOR(nr) {
         ggml_vec_scale_f32(nc, (float *) ((char *) dst->data + i1*(dst->nb[1])), v);
     }
 }
@@ -7084,20 +7036,10 @@ static void ggml_compute_forward_soft_max_f32(
 
     // TODO: handle transposed/permuted matrices
 
-    const int ith = params->ith;
-    const int nth = params->nth;
-
     const int nc = src0->ne[0];
     const int nr = ggml_nrows(src0);
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
-    for (int i1 = ir0; i1 < ir1; i1++) {
+    MULTI_THREAD_FOR(nr) {
         float *p = (float *)((char *) dst->data + i1*dst->nb[1]);
 
 #ifndef NDEBUG
@@ -7348,9 +7290,6 @@ static void ggml_compute_forward_conv_1d_1s_f16_f32(
     //const int nb2  = dst->nb[2];
     //const int nb3  = dst->nb[3];
 
-    const int ith = params->ith;
-    const int nth = params->nth;
-
     const int nk = ne00;
     const int nh = nk/2;
 
@@ -7402,14 +7341,7 @@ static void ggml_compute_forward_conv_1d_1s_f16_f32(
     // total rows in dst
     const int nr = ne02;
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
-    for (int i1 = ir0; i1 < ir1; i1++) {
+    MULTI_THREAD_FOR(nr) {
         float * dst_data = (float *)((char *) dst->data + i1*nb1);
         for (int i0 = 0; i0 < ne10; ++i0) {
             dst_data[i0] = 0;
@@ -7522,14 +7454,7 @@ static void ggml_compute_forward_conv_1d_1s_f32(
     // total rows in dst
     const int nr = ne02;
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
-    for (int i1 = ir0; i1 < ir1; i1++) {
+    MULTI_THREAD_FOR(nr) {
         float * dst_data = (float *)((char *) dst->data + i1*nb1);
         for (int i0 = 0; i0 < ne10; ++i0) {
             dst_data[i0] = 0;
@@ -7670,14 +7595,7 @@ static void ggml_compute_forward_conv_1d_2s_f16_f32(
     // total rows in dst
     const int nr = ne02;
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
-    for (int i1 = ir0; i1 < ir1; i1++) {
+    MULTI_THREAD_FOR(nr) {
         float * dst_data = (float *)((char *) dst->data + i1*nb1);
         for (int i0 = 0; i0 < ne10; i0 += 2) {
             dst_data[i0/2] = 0;
@@ -7790,14 +7708,7 @@ static void ggml_compute_forward_conv_1d_2s_f32(
     // total rows in dst
     const int nr = ne02;
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
-    for (int i1 = ir0; i1 < ir1; i1++) {
+    MULTI_THREAD_FOR(nr) {
         float * dst_data = (float *)((char *) dst->data + i1*nb1);
         for (int i0 = 0; i0 < ne10; i0 += 2) {
             dst_data[i0/2] = 0;
@@ -7936,22 +7847,15 @@ static void ggml_compute_forward_flash_attn_f32(
     // total rows in q
     const int nr = neq1*neq2*neq3;
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
     const float scale = 1.0f/sqrtf(D);
 
     //printf("P=%d N=%d D=%d ir0=%d ir1=%d scale = %f\n", P, N, D, ir0, ir1, scale);
 
-    for (int ir = ir0; ir < ir1; ++ir) {
+    MULTI_THREAD_FOR(nr) {
         // q indices
-        const int iq3 = ir/(neq2*neq1);
-        const int iq2 = (ir - iq3*neq2*neq1)/neq1;
-        const int iq1 = (ir - iq3*neq2*neq1 - iq2*neq1);
+        const int iq3 = i1/(neq2*neq1);
+        const int iq2 = (i1 - iq3*neq2*neq1)/neq1;
+        const int iq1 = (i1 - iq3*neq2*neq1 - iq2*neq1);
 
         float * S = (float *) params->wdata + ith*(Mup + CACHE_LINE_SIZE_F32);
 
@@ -7966,10 +7870,10 @@ static void ggml_compute_forward_flash_attn_f32(
             const int ik1 = ic;
 
             // S indices
-            const int i1 = ik1;
+            const int j1 = ik1;
 
             ggml_vec_dot_f32(neq0,
-                    S + i1,
+                    S + j1,
                     (float *) ((char *) k->data + (ik1*nbk1 + ik2*nbk2 + ik3*nbk3)),
                     (float *) ((char *) q->data + (iq1*nbq1 + iq2*nbq2 + iq3*nbq3)));
         }
@@ -8101,7 +8005,6 @@ static void ggml_compute_forward_flash_attn_f16(
     const int nb3  = dst->nb[3];
 
     const int ith = params->ith;
-    const int nth = params->nth;
 
     const int D = neq0;
     const int N = neq1;
@@ -8145,22 +8048,15 @@ static void ggml_compute_forward_flash_attn_f16(
     // total rows in q
     const int nr = neq1*neq2*neq3;
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
     const float scale = 1.0f/sqrtf(D);
 
     //printf("P=%d N=%d D=%d ir0=%d ir1=%d scale = %f\n", P, N, D, ir0, ir1, scale);
 
-    for (int ir = ir0; ir < ir1; ++ir) {
+    MULTI_THREAD_FOR(nr) {
         // q indices
-        const int iq3 = ir/(neq2*neq1);
-        const int iq2 = (ir - iq3*neq2*neq1)/neq1;
-        const int iq1 = (ir - iq3*neq2*neq1 - iq2*neq1);
+        const int iq3 = i1/(neq2*neq1);
+        const int iq2 = (i1 - iq3*neq2*neq1)/neq1;
+        const int iq1 = (i1 - iq3*neq2*neq1 - iq2*neq1);
 
         float * S = (float *) params->wdata + ith*(2*Mup + CACHE_LINE_SIZE_F32);
 
@@ -8443,18 +8339,11 @@ static void ggml_compute_forward_flash_ff_f16(
     // total rows in a
     const int nr = nea1*nea2*nea3;
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
-
-    // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
-
-    for (int ir = ir0; ir < ir1; ++ir) {
+    MULTI_THREAD_FOR(nr) {
         // a indices
-        const int ia3 = ir/(nea2*nea1);
-        const int ia2 = (ir - ia3*nea2*nea1)/nea1;
-        const int ia1 = (ir - ia3*nea2*nea1 - ia2*nea1);
+        const int ia3 = i1/(nea2*nea1);
+        const int ia2 = (i1 - ia3*nea2*nea1)/nea1;
+        const int ia1 = (i1 - ia3*nea2*nea1 - ia2*nea1);
 
         float * S = (float *) params->wdata + ith*(2*M + CACHE_LINE_SIZE_F32);
 
