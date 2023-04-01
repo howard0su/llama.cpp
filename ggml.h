@@ -253,6 +253,12 @@ enum ggml_op {
     GGML_OP_COUNT,
 };
 
+enum Callbacks
+{
+    GGML_NEED_INIT = 0x01,
+    GGML_NEED_FINALIZE = 0x02,
+};
+
 // n-dimensional tensor
 struct ggml_tensor {
     enum ggml_type type;
@@ -283,7 +289,8 @@ struct ggml_tensor {
     int64_t perf_time_us;
 
     void * data;
-    char padding[8];
+    uint8_t callback_flags;
+    char padding[7];
 };
 
 // computation graph
