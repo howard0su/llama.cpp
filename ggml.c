@@ -50,6 +50,7 @@ static LONG atomic_fetch_sub(atomic_int* ptr, LONG dec) {
     return atomic_fetch_add(ptr, -(dec));
 }
 
+#define USE_NEW_DISTRIBUTE
 #ifdef USE_NEW_DISTRIBUTE
 #define MULTI_THREAD_FOR(nr) for(int i1=params->ith; i1 < (nr); i1 += params->nth)
 #else
