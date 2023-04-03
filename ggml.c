@@ -50,16 +50,6 @@ static LONG atomic_fetch_sub(atomic_int* ptr, LONG dec) {
     return atomic_fetch_add(ptr, -(dec));
 }
 
-#define USE_NEW_DISTRIBUTE
-#ifdef USE_NEW_DISTRIBUTE
-#define MULTI_THREAD_FOR(nr) for(int i1=params->ith; i1 < (nr); i1 += params->nth)
-#else
-#define MULTI_THREAD_FOR(nr) \
-    const int _dr = ((nr) + params->nth - 1)/params->nth; \
-    const int _ir0 = _dr*params->ith; \
-    const int _ir1 = MIN(_ir0 + _dr, (nr)); \
-    for(int i1=_ir0; i1 < _ir1; i1 ++)
-#endif
 typedef HANDLE pthread_t;
 
 typedef DWORD thread_ret_t;
@@ -87,6 +77,17 @@ static int sched_yield (void) {
 #include <stdatomic.h>
 
 typedef void* thread_ret_t;
+#endif
+
+#define USE_NEW_DISTRIBUTE
+#ifdef USE_NEW_DISTRIBUTE
+#define MULTI_THREAD_FOR(nr) for(int i1=params->ith; i1 < (nr); i1 += params->nth)
+#else
+#define MULTI_THREAD_FOR(nr) \
+    const int _dr = ((nr) + params->nth - 1)/params->nth; \
+    const int _ir0 = _dr*params->ith; \
+    const int _ir1 = MIN(_ir0 + _dr, (nr)); \
+    for(int i1=_ir0; i1 < _ir1; i1 ++)
 #endif
 
 // __FMA__ and __F16C__ are not defined in MSVC, however they are implied with AVX2/AVX512
