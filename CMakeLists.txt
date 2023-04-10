@@ -357,6 +357,19 @@ if (BUILD_SHARED_LIBS)
     target_compile_definitions(llama PRIVATE LLAMA_SHARED LLAMA_BUILD)
 endif()
 
+add_library(rwkv
+            rwkv.cpp
+            rwkv.h)
+
+target_include_directories(rwkv PUBLIC .)
+target_compile_features(rwkv PUBLIC cxx_std_11) # don't bump
+target_link_libraries(rwkv PRIVATE ggml ${RWKV_EXTRA_LIBS})
+if (BUILD_SHARED_LIBS)
+    set_target_properties(rwkv PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_definitions(rwkv PRIVATE RWKV_SHARED RWKV_BUILD)
+endif()
+
+
 #
 # programs, examples and tests
 #
