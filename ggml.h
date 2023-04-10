@@ -225,6 +225,9 @@ enum ggml_op {
     GGML_OP_ABS,
     GGML_OP_SGN,
     GGML_OP_NEG,
+    GGML_OP_EXP,
+    GGML_OP_1_MINUS_X,
+    GGML_OP_MAX,
     GGML_OP_STEP,
     GGML_OP_RELU,
     GGML_OP_GELU,
@@ -468,6 +471,19 @@ struct ggml_tensor * ggml_sgn(
 struct ggml_tensor * ggml_neg(
         struct ggml_context * ctx,
         struct ggml_tensor  * a);
+
+struct ggml_tensor * ggml_exp(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * a);
+
+struct ggml_tensor * ggml_1_minus_x(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * a);
+
+struct ggml_tensor * ggml_max(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * a,
+        struct ggml_tensor  * b);
 
 struct ggml_tensor * ggml_step(
         struct ggml_context * ctx,
