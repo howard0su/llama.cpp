@@ -3,6 +3,7 @@ set(TARGET worker)
 add_executable(${TARGET} 
   worker.cpp
   engine.cpp
+  embeddings.cpp
   cJSON.c
   mongoose.c
 )

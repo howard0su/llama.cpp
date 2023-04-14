@@ -15,11 +15,10 @@
 
 static llama_context *ctx;
 static gpt_params params;
-
+#if 0
 static thread_ret_t eval_thread(void *context)
 {
     struct request *req = (struct request *)context;
-    auto c = req->c;
 
     // Add a space in front of the first character to match OG llama tokenizer behavior
     req->prompt.insert(0, 1, ' ');
@@ -61,7 +60,7 @@ static thread_ret_t eval_thread(void *context)
             if (llama_eval(ctx, emb_output.data(), emb_output.size(), n_past, 16))
             { // hack
                 fprintf(stderr, "%s : failed to eval\n", __func__);
-                return 1;
+                return NULL;
             }
         }
 
@@ -138,8 +137,9 @@ static thread_ret_t eval_thread(void *context)
 
     printf("Connection is closed\n");
 
-    return 0;
+    return NULL;
 }
+#endif
 
 int engine_init(int argc, char *argv[])
 {
@@ -170,4 +170,17 @@ int engine_init(int argc, char *argv[])
             return 1;
         }
     }
+
+    return 0;
+}
+
+void Request::Prepare(mg_http_message * hm) {
+    // fetch the paramters
+    this->model = mg_json_get_str(hm->body, "$.model");
+    if (model.empty())
+    {
+        throw "Required field model is missing";
+    }
+
+    this->user = mg_json_get_str(hm->body, "$.user");
 }
