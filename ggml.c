@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 
 #include "ggml.h"
+#include "ggml-internal.h"
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
 #include <malloc.h> // using malloc.h with MSC/MINGW
@@ -3433,6 +3434,21 @@ float ggml_type_sizef(enum ggml_type type) {
 
 const char * ggml_type_name(enum ggml_type type) {
     return GGML_TYPE_NAME[type];
+}
+
+enum ggml_tensor_type ggml_tensor_type(const struct ggml_tensor* tensor)
+{
+    return tensor->type;
+}
+
+const int64_t* ggml_tensor_ne(const struct ggml_tensor* tensor)
+{
+    return tensor->ne;
+}
+
+const size_t*  ggml_tensor_nb(const struct ggml_tensor* tensor)
+{
+    return tensor->nb;
 }
 
 
@@ -11432,6 +11448,30 @@ size_t ggml_quantize_q4_1(const float * src, void * dst, int n, int k, int64_t *
     return (n/QK4_1*sizeof(block_q4_1));
 }
 
+////////////////////////////////////////////////////////////////////////////////
+struct ggml_cgraph *ggml_graph_create(int thread)
+{
+    struct ggml_cgraph *graph = malloc(sizeof(struct ggml_cgraph));
+    memset(graph, 0, sizeof(struct ggml_cgraph));
+    graph->n_threads = thread;
+
+    return graph;
+}
+
+void ggml_graph_delete(struct ggml_cgraph * gf)
+{
+    free(gf);
+}
+
+size_t ggml_tensor_size()
+{
+    return sizeof(struct ggml_tensor) + sizeof(struct ggml_object);
+}
+
+void ggml_tensor_data_set(struct ggml_tensor* tensor, void* d)
+{
+    tensor->data = d;
+}
 ////////////////////////////////////////////////////////////////////////////////
 
 int ggml_cpu_has_avx(void) {

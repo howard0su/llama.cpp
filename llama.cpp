@@ -618,7 +618,7 @@ struct llama_model_loader {
     void calc_sizes(size_t * ctx_size_p, size_t * mmapped_size_p) const {
         *ctx_size_p = *mmapped_size_p = 0;
         for (const llama_load_tensor & lt : tensors_map.tensors) {
-            *ctx_size_p += sizeof(struct ggml_tensor) + GGML_OBJECT_SIZE;
+            *ctx_size_p += ggml_tensor_size();
             *(use_mmap ? mmapped_size_p : ctx_size_p) += lt.size;
         }
     }
@@ -680,9 +680,9 @@ struct llama_model_loader {
                 progress_callback((float) done_size / data_size, progress_callback_user_data);
             }
             LLAMA_ASSERT(lt.ggml_tensor); // unused tensors should have been caught by load_data already
-            lt.data = (uint8_t *) lt.ggml_tensor->data;
+            lt.data = (uint8_t *) ggml_get_data(lt.ggml_tensor);
             load_data_for(lt);
-            lt.ggml_tensor->data = lt.data;
+            ggml_tensor_data_set(lt.ggml_tensor, lt.data);
             done_size += lt.size;
             if (use_mmap && lmlock) {
                 lmlock->grow_to(done_size);
@@ -1062,11 +1062,10 @@ static bool llama_eval_internal(
 
     // for big prompts, if BLAS is enabled, it is better to use only one thread
     // otherwise, the threads are spin-lock waiting for the BLAS calls and are degrading the performance
-    ggml_cgraph gf = {};
-    gf.n_threads = N >= 32 && ggml_cpu_has_blas() ? 1 : n_threads;
+    ggml_cgraph *gf = ggml_graph_create(N >= 32 && ggml_cpu_has_blas() ? 1 : n_threads);
 
     struct ggml_tensor * embd = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, N);
-    memcpy(embd->data, tokens, N*ggml_element_size(embd));
+    ggml_tensor_data_set(embd, (void*)tokens);
 
     struct ggml_tensor * inpL = ggml_get_rows(ctx0, model.tok_embeddings, embd);
 
@@ -1104,8 +1103,8 @@ static bool llama_eval_internal(
                         (il*n_ctx)*ggml_element_size(kv_self.v)*n_embd + n_past*ggml_element_size(kv_self.v));
 
                 // important: storing RoPE-ed version of K in the KV cache!
-                ggml_build_forward_expand(&gf, ggml_cpy(ctx0, Kcur, k));
-                ggml_build_forward_expand(&gf, ggml_cpy(ctx0, Vcur, v));
+                ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kcur, k));
+                ggml_build_forward_expand(gf, ggml_cpy(ctx0, Vcur, v));
             }
 
             struct ggml_tensor * Q =
@@ -1234,9 +1233,9 @@ static bool llama_eval_internal(
     //inpL = ggml_soft_max(ctx0, inpL);
 
     // run the computation
-    ggml_build_forward_expand(&gf, inpL);
-    ggml_graph_compute       (ctx0, &gf);
-
+    ggml_build_forward_expand(gf, inpL);
+    ggml_graph_compute       (ctx0, gf);
+    ggml_graph_delete        (gf);
     // print timing information per ggml operation (for debugging purposes)
     // requires GGML_PERF to be defined
     //ggml_graph_print(&gf);

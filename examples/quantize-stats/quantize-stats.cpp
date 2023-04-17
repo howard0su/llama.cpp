@@ -123,11 +123,15 @@ void print_error_stats(const std::string & name, const error_stats & stats, bool
 static bool tensor_is_contiguous(const struct ggml_tensor * tensor) {
     static_assert(GGML_MAX_DIMS == 4, "GGML_MAX_DIMS is not 4 - update this function");
 
+    const size_t *nb = ggml_tensor_nb(tensor);
+    const int64_t *ne= ggml_tensor_ne(tensor);
+    enum ggml_type type = ggml_tensor_type(tensor);
+
     return
-        tensor->nb[0] == ggml_type_size(tensor->type) &&
-        tensor->nb[1] == (tensor->nb[0]*tensor->ne[0])/ggml_blck_size(tensor->type) &&
-        tensor->nb[2] == tensor->nb[1]*tensor->ne[1] &&
-        tensor->nb[3] == tensor->nb[2]*tensor->ne[2];
+        nb[0] == ggml_type_size(type) &&
+        nb[1] == (nb[0]*ne[0])/ggml_blck_size(type) &&
+        nb[2] == nb[1]*ne[1] &&
+        nb[3] == nb[2]*ne[2];
 }
 
 // Run quantization function for a single layer and update error stats
@@ -149,7 +153,7 @@ void test_roundtrip_on_layer(
     for (int64_t offset = 0; offset < nelements; offset += SCRATCH_ELEMENTS) {
         int64_t chunk_size = std::min(SCRATCH_ELEMENTS, nelements - offset);
 
-        if (layer->type == GGML_TYPE_F16) {
+        if (ggml_tensor_type(layer) == GGML_TYPE_F16) {
             for (int i = 0; i < chunk_size; i++) {
                 input_scratch[i] = ggml_get_f32_1d(layer, i + offset);
             }
@@ -272,17 +276,18 @@ int main(int argc, char ** argv) {
     int64_t max_nelements = 0;
     bool is_f16 = false;
     for (const auto& kv_tensor : tensors) {
+        enum ggml_type second_type = ggml_tensor_type(kv_tensor.second);
         if (!layer_included(params, kv_tensor.first)) {
             continue;
         }
         if (params.verbose) {
-            printf("%s: type %s, size %" PRId64 "\n", kv_tensor.first.c_str(), ggml_type_name(kv_tensor.second->type), ggml_nelements(kv_tensor.second));
+            printf("%s: type %s, size %" PRId64 "\n", kv_tensor.first.c_str(), ggml_type_name(second_type), ggml_nelements(kv_tensor.second));
         }
-        if (kv_tensor.second->type == GGML_TYPE_F16) {
+        if (second_type == GGML_TYPE_F16) {
             is_f16 = true;
-        } else if (kv_tensor.second->type != GGML_TYPE_F32) {
+        } else if (second_type != GGML_TYPE_F32) {
             fprintf(stderr, "%s: error: Quantization should be tested with a float model, "
-                "this model contains already quantized layers (%s is type %d)\n", __func__, kv_tensor.first.c_str(), kv_tensor.second->type);
+                "this model contains already quantized layers (%s is type %d)\n", __func__, kv_tensor.first.c_str(), second_type);
             llama_free(ctx);
             return 1;
         }
