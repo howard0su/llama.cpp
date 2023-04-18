@@ -1,5 +1,47 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// if C99 - static_assert is noop
+// ref: https://stackoverflow.com/a/53923785/4039976
+#ifndef static_assert
+#define static_assert(cond, msg) struct global_scope_noop_trick
+#endif
+
+//
+// logging
+//
+
+#if (GGML_DEBUG >= 1)
+#define GGML_PRINT_DEBUG(...) printf(__VA_ARGS__)
+#else
+#define GGML_PRINT_DEBUG(...)
+#endif
+
+#if (GGML_DEBUG >= 5)
+#define GGML_PRINT_DEBUG_5(...) printf(__VA_ARGS__)
+#else
+#define GGML_PRINT_DEBUG_5(...)
+#endif
+
+#if (GGML_DEBUG >= 10)
+#define GGML_PRINT_DEBUG_10(...) printf(__VA_ARGS__)
+#else
+#define GGML_PRINT_DEBUG_10(...)
+#endif
+
+#define GGML_PRINT(...) printf(__VA_ARGS__)
+
+#define GGML_ASSERT(x) \
+    do { \
+        if (!(x)) { \
+            fprintf(stderr, "GGML_ASSERT: %s:%d: %s\n", __FILE__, __LINE__, #x); \
+            abort(); \
+        } \
+    } while (0)
+
 // available tensor operations:
 enum ggml_op {
     GGML_OP_NONE = 0,
@@ -92,7 +134,7 @@ struct ggml_tensor {
     int64_t perf_time_us;
 
     void * data;
-    char padding[8];
+    struct ggml_context * ctx;
 };
 
 // computation graph
@@ -113,3 +155,31 @@ struct ggml_cgraph {
     int64_t perf_cycles;
     int64_t perf_time_us;
 };
+
+/////////////////////////////////////////////////////////////////////////////////
+
+static inline int ggml_nrows(const struct ggml_tensor * tensor) {
+    static_assert(GGML_MAX_DIMS == 4, "GGML_MAX_DIMS is not 4 - update this function");
+
+    return tensor->ne[1]*tensor->ne[2]*tensor->ne[3];
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+// CUDA related functions
+///////////////////////////////////////////////////////////////////////////////
+extern int cuda_device; // -1: No CUDA, 0-N: one cuda card
+
+int ggml_cuda_init(int prefered);
+void *ggml_cuda_allocate(int size);
+void ggml_cuda_copy(void * target, const void * src, size_t size);
+
+
+struct ggml_tensor * ggml_set_f32_cuda(struct ggml_tensor * tensor, float value);
+struct ggml_tensor * ggml_set_i32_cuda(struct ggml_tensor * tensor, int32_t value);
+
+void ggml_compute_forward_cuda(struct ggml_compute_params * params, struct ggml_tensor * tensor);
+
+#ifdef __cplusplus
+}
+#endif

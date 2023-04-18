@@ -139,9 +139,9 @@ struct llama_file {
     }
 
     ~llama_file() {
-        if (fp) {
-            std::fclose(fp);
-        }
+        // if (fp) {
+        //     std::fclose(fp);
+        // }
     }
 };
 

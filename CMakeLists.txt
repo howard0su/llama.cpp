@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.12) # Don't bump this version for no reason
-project("llama.cpp" C CXX)
+project("llama.cpp" C CXX CUDA)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CUDA_ARCHITECTURES OFF)
 
 if (NOT XCODE AND NOT MSVC AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -40,6 +41,8 @@ endif()
 option(LLAMA_STATIC                 "llama: static link libraries"                          OFF)
 option(LLAMA_NATIVE                 "llama: enable -march=native flag"                      OFF)
 option(LLAMA_LTO                    "llama: enable link time optimization"                  OFF)
+option(LLAMA_CUDA                   "llama: Support offload to CUDA"                        OFF)
+
 
 # debug
 option(LLAMA_ALL_WARNINGS           "llama: enable all compiler warnings"                   ON)
@@ -213,7 +216,7 @@ if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm" OR ${CMAKE_SYSTEM_PROCESSOR} MATCHES
         # TODO: arm msvc?
     else()
         if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
-            add_compile_options(-mcpu=native)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS -mcpu=native)
         endif()
         # TODO: armv6,7,8 version specific flags
     endif()
@@ -221,7 +224,7 @@ elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(x86_64|i686|AMD64)$")
     message(STATUS "x86 detected")
     if (MSVC)
         if (LLAMA_AVX512)
-            add_compile_options(/arch:AVX512)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS /arch:AVX512)
             # MSVC has no compile-time flags enabling specific
             # AVX512 extensions, neither it defines the
             # macros corresponding to the extensions.
@@ -233,32 +236,32 @@ elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "^(x86_64|i686|AMD64)$")
                 add_compile_definitions(__AVX512VNNI__)
             endif()
         elseif (LLAMA_AVX2)
-            add_compile_options(/arch:AVX2)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS /arch:AVX2)
         elseif (LLAMA_AVX)
-            add_compile_options(/arch:AVX)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS /arch:AVX)
         endif()
     else()
         if (LLAMA_F16C)
-            add_compile_options(-mf16c)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS -mf16c)
         endif()
         if (LLAMA_FMA)
-            add_compile_options(-mfma)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS -mfma)
         endif()
         if (LLAMA_AVX)
-            add_compile_options(-mavx)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS -mavx)
         endif()
         if (LLAMA_AVX2)
-            add_compile_options(-mavx2)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS -mavx2)
         endif()
         if (LLAMA_AVX512)
-            add_compile_options(-mavx512f)
-            add_compile_options(-mavx512bw)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS -mavx512f)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS -mavx512bw)
         endif()
         if (LLAMA_AVX512_VBMI)
-            add_compile_options(-mavx512vbmi)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS -mavx512vbmi)
         endif()
         if (LLAMA_AVX512_VNNI)
-            add_compile_options(-mavx512vnni)
+            set_source_files_properties(ggml.c PROPERTIES COMPILE_FLAGS -mavx512vnni)
         endif()
     endif()
 else()
@@ -270,13 +273,22 @@ endif()
 # Build libraries
 #
 
-add_library(ggml OBJECT
+find_package(CUDA REQUIRED)
+
+cuda_add_library(ggml
             ggml.c
+            ggml_cuda.cu
+            ggml-internal.h
             ggml.h)
 
 target_include_directories(ggml PUBLIC .)
-target_compile_features(ggml PUBLIC c_std_11) # don't bump
-target_link_libraries(ggml PRIVATE Threads::Threads ${LLAMA_EXTRA_LIBS})
+#target_compile_features(ggml PUBLIC c_std_11) # don't bump
+target_link_libraries(ggml Threads::Threads ${LLAMA_EXTRA_LIBS})
+# Set some properties for the library target
+set_target_properties(ggml PROPERTIES
+  CUDA_SEPARABLE_COMPILATION ON # Enable separable compilation
+  CUDA_ARCHITECTURES 60 # Specify the architectures to generate code for
+)
 if (BUILD_SHARED_LIBS)
     set_target_properties(ggml PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()

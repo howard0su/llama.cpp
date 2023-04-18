@@ -21,12 +21,6 @@
 #include <stdio.h>
 #include <float.h>
 
-// if C99 - static_assert is noop
-// ref: https://stackoverflow.com/a/53923785/4039976
-#ifndef static_assert
-#define static_assert(cond, msg) struct global_scope_noop_trick
-#endif
-
 #if defined(_WIN32)
 
 #include <windows.h>
@@ -134,14 +128,6 @@ inline static void* ggml_aligned_malloc(size_t size) {
 
 #define UNUSED(x) (void)(x)
 #define SWAP(x, y, T) do { T SWAP = x; x = y; y = SWAP; } while (0)
-
-#define GGML_ASSERT(x) \
-    do { \
-        if (!(x)) { \
-            fprintf(stderr, "GGML_ASSERT: %s:%d: %s\n", __FILE__, __LINE__, #x); \
-            abort(); \
-        } \
-    } while (0)
 
 #ifdef GGML_USE_ACCELERATE
 #include <Accelerate/Accelerate.h>
@@ -3144,30 +3130,6 @@ inline static void ggml_vec_norm_inv_f32(const int n, float * s, const float * x
 }
 
 //
-// logging
-//
-
-#if (GGML_DEBUG >= 1)
-#define GGML_PRINT_DEBUG(...) printf(__VA_ARGS__)
-#else
-#define GGML_PRINT_DEBUG(...)
-#endif
-
-#if (GGML_DEBUG >= 5)
-#define GGML_PRINT_DEBUG_5(...) printf(__VA_ARGS__)
-#else
-#define GGML_PRINT_DEBUG_5(...)
-#endif
-
-#if (GGML_DEBUG >= 10)
-#define GGML_PRINT_DEBUG_10(...) printf(__VA_ARGS__)
-#else
-#define GGML_PRINT_DEBUG_10(...)
-#endif
-
-#define GGML_PRINT(...) printf(__VA_ARGS__)
-
-//
 // data types
 //
 
@@ -3324,6 +3286,8 @@ struct ggml_context {
 
     struct ggml_scratch scratch;
     struct ggml_scratch scratch_save;
+
+    bool   use_cuda;
 };
 
 struct ggml_context_container {
@@ -3406,12 +3370,6 @@ int64_t ggml_nelements(const struct ggml_tensor * tensor) {
     static_assert(GGML_MAX_DIMS == 4, "GGML_MAX_DIMS is not 4 - update this function");
 
     return tensor->ne[0]*tensor->ne[1]*tensor->ne[2]*tensor->ne[3];
-}
-
-int ggml_nrows(const struct ggml_tensor * tensor) {
-    static_assert(GGML_MAX_DIMS == 4, "GGML_MAX_DIMS is not 4 - update this function");
-
-    return tensor->ne[1]*tensor->ne[2]*tensor->ne[3];
 }
 
 size_t ggml_nbytes(const struct ggml_tensor * tensor) {
@@ -3557,6 +3515,9 @@ struct ggml_context * ggml_init(struct ggml_init_params params) {
         // initialize time system (required on Windows)
         ggml_time_init();
 
+        // initialize cuda
+        ggml_cuda_init(0);
+
         // initialize GELU, SILU and EXP F32 tables
         {
             const uint64_t t_start = ggml_time_us(); UNUSED(t_start);
@@ -3629,6 +3590,7 @@ struct ggml_context * ggml_init(struct ggml_init_params params) {
         /*.objects_end        =*/ NULL,
         /*.scratch            =*/ { 0, 0, NULL, },
         /*.scratch_save       =*/ { 0, 0, NULL, },
+        /*.use_cuda           =*/ cuda_device != -1,
     };
 
     GGML_ASSERT(ctx->mem_buffer != NULL);
@@ -3709,6 +3671,12 @@ struct ggml_tensor * ggml_new_tensor_impl(
         size_needed = ((size_needed + GGML_MEM_ALIGN - 1)/GGML_MEM_ALIGN)*GGML_MEM_ALIGN;
     }
 
+    if (size_needed != 0 && ctx->use_cuda)
+    {
+        data = ggml_cuda_allocate(size_needed);
+        size_needed = 0; // don't allocate on ctx
+    }
+
     char * const mem_buffer = ctx->mem_buffer;
     struct ggml_object * const obj_new = (struct ggml_object *)(mem_buffer + cur_end);
 
@@ -3784,8 +3752,8 @@ struct ggml_tensor * ggml_new_tensor_impl(
         /*.perf_runs    =*/ 0,
         /*.perf_cycles  =*/ 0,
         /*.perf_time_us =*/ 0,
-        /*.data         =*/ (data == NULL && !ctx->no_alloc) ? (void *)(result + 1) : data,
-        /*.pad          =*/ { 0 },
+        /*.data         =*/ (data == NULL && !ctx->no_alloc && !ctx->use_cuda) ? (void *)(result + 1) : data,
+        /*.ctx          =*/ ctx,
     };
 
     // TODO: this should not be needed as long as we don't rely on aligned SIMD loads
@@ -3886,7 +3854,66 @@ struct ggml_tensor * ggml_set_zero(struct ggml_tensor * tensor) {
     return tensor;
 }
 
-struct ggml_tensor * ggml_set_i32 (struct ggml_tensor * tensor, int32_t value) {
+struct ggml_tensor * ggml_set_i32_cpu (struct ggml_tensor * tensor, int32_t value) {
+    const int n     = ggml_nrows(tensor);
+    const int nc    = tensor->ne[0];
+    const size_t n1 = tensor->nb[1];
+
+    char * const data = tensor->data;
+
+    switch (tensor->type) {
+        case GGML_TYPE_I8:
+            {
+                assert(tensor->nb[0] == sizeof(int8_t));
+                for (int i = 0; i < n; i++) {
+                    ggml_vec_set_i8(nc, (int8_t *)(data + i*n1), value);
+                }
+            } break;
+        case GGML_TYPE_I16:
+            {
+                assert(tensor->nb[0] == sizeof(int16_t));
+                for (int i = 0; i < n; i++) {
+                    ggml_vec_set_i16(nc, (int16_t *)(data + i*n1), value);
+                }
+            } break;
+        case GGML_TYPE_I32:
+            {
+                assert(tensor->nb[0] == sizeof(int32_t));
+                for (int i = 0; i < n; i++) {
+                    ggml_vec_set_i32(nc, (int32_t *)(data + i*n1), value);
+                }
+            } break;
+        case GGML_TYPE_F16:
+            {
+                assert(tensor->nb[0] == sizeof(ggml_fp16_t));
+                for (int i = 0; i < n; i++) {
+                    ggml_vec_set_f16(nc, (ggml_fp16_t *)(data + i*n1), value);
+                }
+            } break;
+        case GGML_TYPE_F32:
+            {
+                assert(tensor->nb[0] == sizeof(float));
+                for (int i = 0; i < n; i++) {
+                    ggml_vec_set_f32(nc, (float *)(data + i*n1), value);
+                }
+            } break;
+        default:
+            {
+                GGML_ASSERT(false);
+            } break;
+    }
+
+    return tensor;
+}
+
+struct ggml_tensor * ggml_set_i32(struct ggml_tensor * tensor, int32_t value) {
+    if (tensor->ctx->use_cuda)
+        ggml_set_i32_cuda(tensor, value);
+    else
+        ggml_set_i32_cpu(tensor, value);
+}
+
+struct ggml_tensor * ggml_set_f32_cpu(struct ggml_tensor * tensor, float value) {
     const int n     = ggml_nrows(tensor);
     const int nc    = tensor->ne[0];
     const size_t n1 = tensor->nb[1];
@@ -3939,55 +3966,10 @@ struct ggml_tensor * ggml_set_i32 (struct ggml_tensor * tensor, int32_t value) {
 }
 
 struct ggml_tensor * ggml_set_f32(struct ggml_tensor * tensor, float value) {
-    const int n     = ggml_nrows(tensor);
-    const int nc    = tensor->ne[0];
-    const size_t n1 = tensor->nb[1];
-
-    char * const data = tensor->data;
-
-    switch (tensor->type) {
-        case GGML_TYPE_I8:
-            {
-                assert(tensor->nb[0] == sizeof(int8_t));
-                for (int i = 0; i < n; i++) {
-                    ggml_vec_set_i8(nc, (int8_t *)(data + i*n1), value);
-                }
-            } break;
-        case GGML_TYPE_I16:
-            {
-                assert(tensor->nb[0] == sizeof(int16_t));
-                for (int i = 0; i < n; i++) {
-                    ggml_vec_set_i16(nc, (int16_t *)(data + i*n1), value);
-                }
-            } break;
-        case GGML_TYPE_I32:
-            {
-                assert(tensor->nb[0] == sizeof(int32_t));
-                for (int i = 0; i < n; i++) {
-                    ggml_vec_set_i32(nc, (int32_t *)(data + i*n1), value);
-                }
-            } break;
-        case GGML_TYPE_F16:
-            {
-                assert(tensor->nb[0] == sizeof(ggml_fp16_t));
-                for (int i = 0; i < n; i++) {
-                    ggml_vec_set_f16(nc, (ggml_fp16_t *)(data + i*n1), value);
-                }
-            } break;
-        case GGML_TYPE_F32:
-            {
-                assert(tensor->nb[0] == sizeof(float));
-                for (int i = 0; i < n; i++) {
-                    ggml_vec_set_f32(nc, (float *)(data + i*n1), value);
-                }
-            } break;
-        default:
-            {
-                GGML_ASSERT(false);
-            } break;
-    }
-
-    return tensor;
+    if (tensor->ctx->use_cuda)
+        ggml_set_f32_cuda(tensor, value);
+    else
+        ggml_set_f32_cpu(tensor, value);
 }
 
 int32_t ggml_get_i32_1d(const struct ggml_tensor * tensor, int i) {
@@ -5291,10 +5273,9 @@ struct ggml_tensor * ggml_rope(
     //struct ggml_tensor * result = inplace ? ggml_view_tensor(ctx, a) : ggml_dup_tensor(ctx, a);
     struct ggml_tensor * result = ggml_view_tensor(ctx, a);
 
+    int32_t data[3] = {n_past, n_dims, mode};
     struct ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 3);
-    ((int32_t *) b->data)[0] = n_past;
-    ((int32_t *) b->data)[1] = n_dims;
-    ((int32_t *) b->data)[2] = mode;
+    ggml_tensor_data_copy(b, data);
 
     result->op   = GGML_OP_ROPE;
     result->grad = is_node ? ggml_dup_tensor(ctx, result) : NULL;
@@ -9412,7 +9393,7 @@ static void ggml_compute_forward_map_binary(
 
 /////////////////////////////////
 
-static void ggml_compute_forward(struct ggml_compute_params * params, struct ggml_tensor * tensor) {
+static void ggml_compute_forward_cpu(struct ggml_compute_params * params, struct ggml_tensor * tensor) {
     GGML_ASSERT(params);
 
     switch (tensor->op) {
@@ -9580,6 +9561,13 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
                 GGML_ASSERT(false);
             } break;
     }
+}
+
+static void ggml_compute_forward(struct ggml_compute_params * params, struct ggml_tensor * tensor) {
+    if (tensor->ctx->use_cuda)
+        ggml_compute_forward_cuda(params, tensor);
+    else
+        ggml_compute_forward_cpu(params, tensor);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -10107,7 +10095,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
 }
 
 void ggml_graph_compute(struct ggml_context * ctx, struct ggml_cgraph * cgraph) {
-    const int n_threads = cgraph->n_threads;
+    const int n_threads = ctx->use_cuda ? 1 : cgraph->n_threads;
 
     struct ggml_compute_state_shared state_shared = {
         /*.spin      =*/ GGML_LOCK_INITIALIZER,
@@ -11470,8 +11458,36 @@ size_t ggml_tensor_size()
 
 void ggml_tensor_data_set(struct ggml_tensor* tensor, void* d)
 {
-    tensor->data = d;
+    if (tensor->ctx->use_cuda)
+    {
+        size_t size = ggml_nbytes(tensor);
+        if (tensor->data == NULL)
+        {
+            tensor->data = ggml_cuda_allocate(size);
+        }
+        ggml_cuda_copy(tensor->data, d, size);
+    }
+    else
+        tensor->data = d;
 }
+
+void ggml_tensor_data_copy(struct ggml_tensor* tensor, void* d)
+{
+    size_t size = ggml_nbytes(tensor);
+    if (tensor->ctx->use_cuda)
+    {
+        if (tensor->data == NULL)
+        {
+            tensor->data = ggml_cuda_allocate(size);
+        }
+        ggml_cuda_copy(tensor->data, d, size);
+    }
+    else
+    {
+        memcpy(tensor->data, d, size);
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 int ggml_cpu_has_avx(void) {

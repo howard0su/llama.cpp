@@ -220,6 +220,8 @@ void ggml_graph_delete(struct ggml_cgraph * gf);
 
 size_t ggml_tensor_size();
 void ggml_tensor_data_set(struct ggml_tensor* tensor, void* d);
+void ggml_tensor_data_copy(struct ggml_tensor* tensor, void* d);
+
 enum ggml_type ggml_tensor_type(const struct ggml_tensor* tensor);
 const int64_t* ggml_tensor_ne(const struct ggml_tensor* tensor);
 const size_t*  ggml_tensor_nb(const struct ggml_tensor* tensor);
