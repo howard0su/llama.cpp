@@ -48,6 +48,12 @@ inline int64_t cpu_cycles() {
 #endif
 }
 
+#elif defined(WIN32) || defined(_WIN64)
+#include <intrin.h>
+#pragma intrinsic(__rdtsc)
+inline int64_t cpu_cycles() {
+    return __rdtsc();
+}
 #else
 
 #define cpu_cycles() 0
@@ -96,11 +102,10 @@ void benchmark_function(size_t size, size_t q_size, std::function<size_t(void)> 
         total_time_us += end_time - start_time;
         min_time_us = std::min(min_time_us, end_time - start_time);
     }
-
-    printf("      min cycles/%d vals   : %9.2f\n",  QK, QK * min_time_cycles / (float) size);
-    printf("      avg cycles/%d vals   : %9.2f\n",  QK, QK * total_time_cycles / (float) (size * ITERATIONS));
-    printf("      float32 throughput   : %9.2f GB/s\n",  gigabytes_per_second(4 * size * ITERATIONS, total_time_us));
-    printf("      quantized throughput : %9.2f GB/s\n",  gigabytes_per_second(q_size * ITERATIONS, total_time_us));
+    printf("%9.2f\t",  QK * min_time_cycles / (float) size);
+    printf("%9.2f\t",  QK * total_time_cycles / (float) (size * ITERATIONS));
+    printf("%9.2f\t",  gigabytes_per_second(4 * size * ITERATIONS, total_time_us));
+    printf("%9.2f\t",  gigabytes_per_second(q_size * ITERATIONS, total_time_us));
 }
 
 int main(int argc, char * argv[]) {
@@ -218,6 +223,8 @@ int main(int argc, char * argv[]) {
     };
     struct ggml_context * ctx = ggml_init(ggml_params);
 
+    printf("%20s\t%4s\t%8s\t%8s\t%8s\t%8s\n", "type", "MB", "min_cycle", " max_cycle", "float (GB/s)", "quantized (GB/s)");
+    printf("=============================================================================================\n");
     for (int i = 0; i < GGML_TYPE_COUNT; i++) {
         ggml_type type = (ggml_type) i;
         quantize_fns_t qfns = ggml_internal_get_quantize_fn(i);
@@ -229,9 +236,9 @@ int main(int argc, char * argv[]) {
             printf("%s\n", ggml_type_name(type));
 
             if (params.op_quantize_row_q_reference) {
-                printf("  quantize_row_q_reference\n");
+                printf("%20s\t", "quantize_row_q_ref");
                 for (size_t size : params.test_sizes) {
-                    printf("    %zu values (%.2f MB)\n", size, 4*size/(float)(1024*1024));
+                    printf("%.2f\t", 4*size/(float)(1024*1024));
                     auto quantize_fn = [&](void ) {
                         qfns.quantize_row_q_reference(test_data1, test_q1, size);
                         return test_q1[0];
@@ -243,9 +250,9 @@ int main(int argc, char * argv[]) {
             }
 
             if (params.op_quantize_row_q) {
-                printf("  quantize_row_q\n");
+                printf("%20s\t", "quantize_row_q");
                 for (size_t size : params.test_sizes) {
-                    printf("    %zu values (%.2f MB)\n", size, 4*size/(float)(1024*1024));
+                    printf("%.2f\t", 4*size/(float)(1024*1024));
                     auto quantize_fn = [&](void ) {
                         qfns.quantize_row_q(test_data1, test_q1, size);
                         return test_q1[0];
@@ -257,10 +264,10 @@ int main(int argc, char * argv[]) {
             }
 
             if (params.op_dequantize_row_q) {
-                printf("  dequantize_row_q\n");
+                printf("%20s\t", "dequantize_row_q");
                 qfns.quantize_row_q(test_data1, test_q1, largest);
                 for (size_t size : params.test_sizes) {
-                    printf("    %zu values (%.2f MB)\n", size, 4*size/(float)(1024*1024));
+                    printf("%.2f\t", 4*size/(float)(1024*1024));
                     auto quantize_fn = [&](void ) {
                         qfns.dequantize_row_q(test_q1, test_out, size);
                         return test_out[0];
@@ -272,9 +279,9 @@ int main(int argc, char * argv[]) {
             }
 
             if (params.op_quantize_row_q_dot) {
-                printf("  quantize_row_q_dot\n");
+                printf("%20s\t", "quantize_row_q_dot");
                 for (size_t size : params.test_sizes) {
-                    printf("    %zu values (%.2f MB)\n", size, 4*size/(float)(1024*1024));
+                    printf("%.2f\t", 4*size/(float)(1024*1024));
                     auto quantize_fn = [&](void ) {
                         qfns.quantize_row_q_dot(test_data1, test_q1, size);
                         return test_q1[0];
@@ -286,11 +293,11 @@ int main(int argc, char * argv[]) {
             }
 
             if (params.op_vec_dot_q) {
-                printf("  vec_dot_q\n");
+                printf("%20s\t", "vec_dot_q");
                 qfns.quantize_row_q(test_data1, test_q1, largest);
                 qfns.quantize_row_q(test_data2, test_q2, largest);
                 for (size_t size : params.test_sizes) {
-                    printf("    %zu values (%.2f MB)\n", size, 4*size/(float)(1024*1024));
+                    printf("%.2f\t", 4*size/(float)(1024*1024));
                     auto quantize_fn = [&](void ) {
                         float result;
                         qfns.vec_dot_q(size, &result, test_q1, test_q2);
