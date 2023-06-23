@@ -24,6 +24,8 @@
 
 #define opencl_printf(...) fprintf(stderr, __VA_ARGS__)
 
+#define UNUSED(x) (void)x
+
 #define MULTILINE_QUOTE(...) #__VA_ARGS__
 static std::string program_source = MULTILINE_QUOTE(
 
@@ -1824,8 +1826,96 @@ void ggml_opencl_graph_compute(
     // create multiple command buffers and enqueue them
     // then, we encode the graph into the command buffers in parallel
 
-    const int n_cb = gf->n_threads;
+    const int n_cb = 1; // gf->n_threads;
 
-    const int n_nodes_per_cb = (gf->n_nodes + n_cb - 1) / n_cb;
+    for (int cb_idx = 0; cb_idx < n_cb; ++cb_idx) {
+        const int n_nodes_per_cb = (gf->n_nodes + n_cb - 1) / n_cb;
 
+        std::thread th { [=]() {
+            size_t offs_src0 = 0;
+            size_t offs_src1 = 0;
+            size_t offs_dst  = 0;
+
+            const int node_start =                                      (cb_idx + 0) * n_nodes_per_cb;
+            const int node_end   = (cb_idx == n_cb - 1) ? gf->n_nodes : (cb_idx + 1) * n_nodes_per_cb;
+
+            for (int i = node_start; i < node_end; ++i) {
+                opencl_printf("%s: encoding node %3d, op = %8s\n", __func__, i, ggml_op_name(gf->nodes[i]->op));
+
+                struct ggml_tensor * src0 = gf->nodes[i]->src0;
+                struct ggml_tensor * src1 = gf->nodes[i]->src1;
+                struct ggml_tensor * dst  = gf->nodes[i];
+
+                const int64_t  ne00 = src0 ? src0->ne[0] : 0;
+                const int64_t  ne01 = src0 ? src0->ne[1] : 0;
+                const int64_t  ne02 = src0 ? src0->ne[2] : 0;
+                const int64_t  ne03 = src0 ? src0->ne[3] : 0;
+
+                const uint64_t nb00 = src0 ? src0->nb[0] : 0;
+                const uint64_t nb01 = src0 ? src0->nb[1] : 0;
+                const uint64_t nb02 = src0 ? src0->nb[2] : 0;
+                const uint64_t nb03 = src0 ? src0->nb[3] : 0;
+
+                const int64_t  ne10 = src1 ? src1->ne[0] : 0;
+                const int64_t  ne11 = src1 ? src1->ne[1] : 0;
+                const int64_t  ne12 = src1 ? src1->ne[2] : 0;
+                const int64_t  ne13 = src1 ? src1->ne[3] : 0; UNUSED(ne13);
+
+                const uint64_t nb10 = src1 ? src1->nb[0] : 0;
+                const uint64_t nb11 = src1 ? src1->nb[1] : 0;
+                const uint64_t nb12 = src1 ? src1->nb[2] : 0;
+                const uint64_t nb13 = src1 ? src1->nb[3] : 0; UNUSED(nb13);
+
+                const int64_t  ne0  = dst ? dst->ne[0] : 0;
+                const int64_t  ne1  = dst ? dst->ne[1] : 0;
+                const int64_t  ne2  = dst ? dst->ne[2] : 0;
+                const int64_t  ne3  = dst ? dst->ne[3] : 0;
+
+                const uint64_t nb0  = dst ? dst->nb[0] : 0;
+                const uint64_t nb1  = dst ? dst->nb[1] : 0;
+                const uint64_t nb2  = dst ? dst->nb[2] : 0;
+                const uint64_t nb3  = dst ? dst->nb[3] : 0;
+
+                const enum ggml_type src0t = src0 ? src0->type : GGML_TYPE_COUNT;
+                const enum ggml_type src1t = src1 ? src1->type : GGML_TYPE_COUNT;
+                const enum ggml_type dstt  = dst  ? dst->type  : GGML_TYPE_COUNT;
+
+                cl_mem id_src0 = src0 ? ggml_opencl_get_buffer(ctx, src0, &offs_src0) : 0;
+                cl_mem id_src1 = src1 ? ggml_opencl_get_buffer(ctx, src1, &offs_src1) : 0;
+                cl_mem id_dst  = dst  ? ggml_opencl_get_buffer(ctx, dst,  &offs_dst)  : 0;
+
+                opencl_printf("%s: op - %s\n", __func__, ggml_op_name(dst->op));
+                if (src0) {
+                   opencl_printf("%s: src0 - %4s [%5lld, %5lld, %5lld], %d, %s\n", __func__, ggml_type_name(src0t), ne00, ne01, ne02,
+                           ggml_is_contiguous(src0), src0->name);
+                }
+                if (src1) {
+                   opencl_printf("%s: src1 - %4s [%5lld, %5lld, %5lld], %d, %s\n", __func__, ggml_type_name(src1t), ne10, ne11, ne12,
+                           ggml_is_contiguous(src1), src1->name);
+                }
+                if (dst) {
+                   opencl_printf("%s: dst  - %4s [%5lld, %5lld, %5lld], 1, %s\n",  __func__, ggml_type_name(dstt),  ne0,  ne1,  ne2,
+                           dst->name);
+                }
+
+                switch (dst->op) {
+                    case GGML_OP_RESHAPE:
+                    case GGML_OP_VIEW:
+                    case GGML_OP_TRANSPOSE:
+                    case GGML_OP_PERMUTE:
+                        {
+                            // noop
+                        } break;
+
+                    default:
+                        fprintf(stderr, "%s: node %3d, op = %8s not implemented\n", __func__, i, ggml_op_name(dst->op));
+                        GGML_ASSERT(false);
+                }
+            }
+        }};
+
+        th.join();
+
+        clFinalize(queue);
+    }
 }
