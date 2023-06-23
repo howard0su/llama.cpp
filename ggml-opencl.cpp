@@ -5,6 +5,7 @@
 #include <sstream>
 #include <vector>
 #include <limits>
+#include <thread>
 
 #define CL_TARGET_OPENCL_VERSION 110
 #include <clblast.h>
@@ -20,6 +21,8 @@
 #endif
 
 #define CL_DMMV_BLOCK_SIZE 32
+
+#define opencl_printf(...) fprintf(stderr, __VA_ARGS__)
 
 #define MULTILINE_QUOTE(...) #__VA_ARGS__
 static std::string program_source = MULTILINE_QUOTE(
@@ -645,15 +648,15 @@ std::array<std::string, 30> dequant_mul_mat_vec_str_values = {
 std::array<std::string, 2> mul_str_keys = {
     "KERNEL_NAME", "TYPE"
 };
-std::array<std::string, 2> mul_str_values = {
+const std::array<std::string, 2> mul_str_values = {
     "mul_f32", "float"
 };
 
-std::array<std::string, 3> dmmv_k_str_keys = {
+const std::array<std::string, 3> dmmv_k_str_keys = {
     "KERNEL_NAME", "X_TYPE", "DOT_KERNEL"
 };
 
-std::array<std::string, 15> dmmv_k_str_values = {
+const std::array<std::string, 15> dmmv_k_str_values = {
     "dequantize_mul_mat_vec_q2_K", "struct block_q2_K", "vec_dot_q2_K",
     "dequantize_mul_mat_vec_q3_K", "struct block_q3_K", "vec_dot_q3_K",
     "dequantize_mul_mat_vec_q4_K", "struct block_q4_K", "vec_dot_q4_K",
@@ -1681,4 +1684,148 @@ void ggml_cl_transform_tensor(void * data, ggml_tensor * tensor) {
 
     tensor->data = dst;
     GGML_ASSERT(tensor->backend == GGML_BACKEND_GPU);
+}
+
+struct ggml_opencl_buffer {
+    const char * name;
+
+    void   * data;
+    size_t   size;
+
+    cl_mem metal;
+};
+
+struct ggml_opencl_context {
+    int n_buffers;
+    struct ggml_opencl_buffer buffers[GGML_OPENCL_MAX_BUFFERS];
+
+};
+
+struct ggml_opencl_context * ggml_opencl_init(void)
+{
+    struct ggml_opencl_context * ctx = (struct ggml_opencl_context *)malloc(sizeof(struct ggml_opencl_context));
+
+    ggml_cl_init();
+    ctx->n_buffers = 0;
+    return ctx;
+}
+
+void ggml_opencl_free(struct ggml_opencl_context * ctx)
+{
+    //TODO
+    return;
+}
+
+// finds the Metal buffer that contains the tensor data on the GPU device
+// the assumption is that there is 1-to-1 mapping between the host and device memory buffers, so we can find the
+// Metal buffer based on the host memory pointer
+//
+static cl_mem ggml_opencl_get_buffer(struct ggml_opencl_context * ctx, struct ggml_tensor * t, size_t * offs) {
+    //fprintf(stderr, "%s: data tensor '%16s', offs_data = %8ld, offs_eval = %8ld, offs_cach = %8ld\n", __func__, t->name, offs_data, offs_eval, offs_cach);
+
+    const int64_t tsize = ggml_nbytes(t);
+
+    // find the view that contains the tensor fully
+    for (int i = 0; i < ctx->n_buffers; ++i) {
+        const int64_t ioffs = (int64_t) t->data - (int64_t) ctx->buffers[i].data;
+
+        if (ioffs >= 0 && ioffs + tsize <= (int64_t) ctx->buffers[i].size) {
+            *offs = (size_t) ioffs;
+
+            //fprintf(stderr, "%s: '%s' tensor '%16s', offs = %8ld\n", __func__, ctx->buffers[i].name, t->name, *offs);
+
+            return ctx->buffers[i].metal;
+        }
+    }
+
+    fprintf(stderr, "%s: error: buffer is nil\n", __func__);
+
+    return nullptr;
+}
+
+bool ggml_opencl_add_buffer(
+        struct ggml_opencl_context * ctx,
+                       const char * name,
+                             void * data,
+                           size_t   size,
+                           size_t   max_size) {
+    if (ctx->n_buffers >= GGML_OPENCL_MAX_BUFFERS) {
+        fprintf(stderr, "%s: too many buffers\n", __func__);
+        return false;
+    }
+
+    if (data) {
+        // verify that the buffer does not overlap with any of the existing buffers
+        for (int i = 0; i < ctx->n_buffers; ++i) {
+            const int64_t ioffs = (int64_t) data - (int64_t) ctx->buffers[i].data;
+
+            if (ioffs >= 0 && ioffs < (int64_t) ctx->buffers[i].size) {
+                fprintf(stderr, "%s: error: buffer '%s' overlaps with '%s'\n", __func__, name, ctx->buffers[i].name);
+                return false;
+            }
+        }
+
+        const size_t size_page = 4 * 1024; // 4k page??
+        cl_int err;
+
+        size_t size_aligned = size;
+        if ((size_aligned % size_page) != 0) {
+            size_aligned += (size_page - (size_aligned % size_page));
+        }
+
+        // the buffer fits into the max buffer size allowed by the device
+        ctx->buffers[ctx->n_buffers].name = name;
+        ctx->buffers[ctx->n_buffers].data = data;
+        ctx->buffers[ctx->n_buffers].size = size;
+
+        ctx->buffers[ctx->n_buffers].metal = clCreateBuffer(context, CL_MEM_READ_WRITE, size, NULL, &err);
+        CL_CHECK(err);
+        CL_CHECK(clEnqueueWriteBuffer(queue, ctx->buffers[ctx->n_buffers].metal,
+            CL_TRUE, 0, size, data, 0, NULL, NULL));
+        fprintf(stderr, "%s: allocated '%-16s' buffer, size = %8.2f MB\n", __func__, name, size_aligned / 1024.0 / 1024.0);
+
+        ++ctx->n_buffers;
+
+        // fprintf(stderr, ", (%8.2f / %8.2f)",
+        //         ctx->device.currentAllocatedSize / 1024.0 / 1024.0,
+        //         ctx->device.recommendedMaxWorkingSetSize / 1024.0 / 1024.0);
+    }
+
+    return true;
+}
+
+void ggml_opencl_set_tensor(
+        struct ggml_opencl_context * ctx,
+        struct ggml_tensor * t) {
+    opencl_printf("%s: set input for tensor '%s'\n", __func__, t->name);
+
+    size_t offs;
+    cl_mem id_dst = ggml_opencl_get_buffer(ctx, t, &offs);
+
+    CL_CHECK(clEnqueueWriteBuffer(queue, id_dst, CL_TRUE, offs, ggml_nbytes(t), t->data, 0, NULL, NULL));
+}
+
+void ggml_opencl_get_tensor(
+        struct ggml_opencl_context * ctx,
+        struct ggml_tensor * t) {
+    opencl_printf("%s: extract results for tensor '%s'\n", __func__, t->name);
+
+    size_t offs;
+    cl_mem id_src = ggml_opencl_get_buffer(ctx, t, &offs);
+
+    CL_CHECK(clEnqueueReadBuffer(queue, id_src,CL_TRUE, offs, ggml_nbytes(t), t->data, 0, NULL, NULL));
+}
+
+void ggml_opencl_graph_compute(
+        struct ggml_opencl_context * ctx,
+               struct ggml_cgraph * gf) {
+    opencl_printf("%s: evaluating graph\n", __func__);
+
+    // create multiple command buffers and enqueue them
+    // then, we encode the graph into the command buffers in parallel
+
+    const int n_cb = gf->n_threads;
+
+    const int n_nodes_per_cb = (gf->n_nodes + n_cb - 1) / n_cb;
+
 }

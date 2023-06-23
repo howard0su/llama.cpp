@@ -301,7 +301,7 @@ if (LLAMA_CLBLAST)
 
         set(GGML_SOURCES_OPENCL ggml-opencl.cpp ggml-opencl.h)
 
-        add_compile_definitions(GGML_USE_CLBLAST)
+        add_compile_definitions(GGML_USE_OPENCL)
 
         set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} clblast)
     else()
