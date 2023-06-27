@@ -1946,7 +1946,7 @@ void ggml_vec_dot_q3_K_q8_K(const int n, float * restrict s, const void * restri
 
     __m256 acc = _mm256_setzero_ps();
 
-    uint32_t *aux;
+    const uint32_t *aux;
 
     for (int i = 0; i < nb; ++i) {
 
@@ -1956,7 +1956,7 @@ void ggml_vec_dot_q3_K_q8_K(const int n, float * restrict s, const void * restri
         const int8_t  * restrict q8 = y[i].qs;
 
         // Set up scales
-        aux = (uint32_t *)x[i].scales;
+        aux = (const uint32_t *)x[i].scales;
         __m128i scales128 = _mm_set_epi32(
                 ((aux[1] >> 4) & kmask2) | (((aux[2] >> 6) & kmask1) << 4),
                 ((aux[0] >> 4) & kmask2) | (((aux[2] >> 4) & kmask1) << 4),
