@@ -461,6 +461,27 @@ else()
     message(STATUS "Unknown architecture")
 endif()
 
+# clock_gettime came in POSIX.1b (1993)
+# CLOCK_MONOTONIC came in POSIX.1-2001 / SUSv3 as optional
+# posix_memalign came in POSIX.1-2001 / SUSv3
+# M_PI is an XSI extension since POSIX.1-2001 / SUSv3, came in XPG1 (1985)
+add_compile_definitions(_XOPEN_SOURCE=600)
+add_compile_definitions(_XOPEN_SOURCE=600)
+
+# Data types, macros and functions related to controlling CPU affinity
+# are available on Linux through GNU extensions in libc
+IF (CMAKE_SYSTEM_NAME MATCHES "Linux")
+	add_compile_definitions(_GNU_SOURCE)
+	add_compile_definitions(_GNU_SOURCE)
+ENDIF()
+
+# RLIMIT_MEMLOCK came in BSD, is not specified in POSIX.1,
+# and on macOS its availability depends on enabling Darwin extensions
+IF (CMAKE_SYSTEM_NAME MATCHES "Darwin")
+	add_compile_definitions(_DARWIN_C_SOURCE)
+	add_compile_definitions(_DARWIN_C_SOURCE)
+ENDIF()
+
 #
 # Build libraries
 #
