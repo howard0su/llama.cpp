@@ -2553,8 +2553,12 @@ static void ggml_cuda_mul_mat_id(ggml_backend_cuda_context & ctx, ggml_tensor * 
 
     const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
 
+    // IQ2_XXS triggers runtime errors in both MMVQ and MMQ kernels when used with
+    // MUL_MAT_ID (256 experts). Force per-expert fallback which uses regular mul_mat.
+    const bool force_per_expert_fallback = (src0->type == GGML_TYPE_IQ2_XXS);
+
     // [TAG_MUL_MAT_ID_CUDA_GRAPHS]
-    if (src1->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32) {
+    if (!force_per_expert_fallback && src1->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32) {
         static_assert(MMVQ_MAX_BATCH_SIZE == MMVF_MAX_BATCH_SIZE);
         if (ne2 <= MMVQ_MAX_BATCH_SIZE) {
             if (ggml_is_quantized(src0->type)) {
