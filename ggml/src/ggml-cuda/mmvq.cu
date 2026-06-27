@@ -107,7 +107,7 @@ static constexpr __host__ __device__ int get_mmvq_mmid_max_batch_pascal_older(gg
         case GGML_TYPE_IQ1_M:   return 6;
         case GGML_TYPE_IQ2_S:   return 4;
         case GGML_TYPE_IQ2_XS:  return 5;
-        case GGML_TYPE_IQ2_XXS: return 5;
+        case GGML_TYPE_IQ2_XXS: return 0; // MMVQ MUL_MAT_ID fails for IQ2_XXS; use fallback path
         case GGML_TYPE_IQ3_S:   return 4;
         case GGML_TYPE_IQ3_XXS: return 4;
         case GGML_TYPE_IQ4_NL:  return 6;
@@ -130,6 +130,7 @@ static constexpr __host__ __device__ int get_mmvq_mmid_max_batch_pascal_older(gg
 static constexpr __host__ __device__ int get_mmvq_mmid_max_batch_turing_plus(ggml_type type) {
     switch (type) {
         case GGML_TYPE_IQ2_S:   return 7;
+        case GGML_TYPE_IQ2_XXS: return 0; // MMVQ MUL_MAT_ID fails for IQ2_XXS; use fallback path
         case GGML_TYPE_IQ3_S:   return 6;
         case GGML_TYPE_IQ3_XXS: return 7;
         case GGML_TYPE_MXFP4:   return 7;
@@ -145,7 +146,7 @@ static constexpr __host__ __device__ int get_mmvq_mmid_max_batch_gcn(ggml_type t
         case GGML_TYPE_IQ1_M:   return 5;
         case GGML_TYPE_IQ2_S:   return 4;
         case GGML_TYPE_IQ2_XS:  return 4;
-        case GGML_TYPE_IQ2_XXS: return 4;
+        case GGML_TYPE_IQ2_XXS: return 0; // MMVQ MUL_MAT_ID fails for IQ2_XXS; use fallback path
         case GGML_TYPE_IQ3_S:   return 4;
         case GGML_TYPE_IQ3_XXS: return 4;
         case GGML_TYPE_IQ4_NL:  return 6;
@@ -166,7 +167,7 @@ static constexpr __host__ __device__ int get_mmvq_mmid_max_batch_cdna(ggml_type 
     switch (type) {
         case GGML_TYPE_IQ2_S:   return 5;
         case GGML_TYPE_IQ2_XS:  return 5;
-        case GGML_TYPE_IQ2_XXS: return 5;
+        case GGML_TYPE_IQ2_XXS: return 0; // MMVQ MUL_MAT_ID fails for IQ2_XXS; use fallback path
         case GGML_TYPE_IQ3_S:   return 4;
         case GGML_TYPE_IQ3_XXS: return 5;
         default:                return MMVQ_MAX_BATCH_SIZE;
@@ -177,7 +178,7 @@ static constexpr __host__ __device__ int get_mmvq_mmid_max_batch_rdna1_rdna2(ggm
     switch (type) {
         case GGML_TYPE_IQ2_S:   return 4;
         case GGML_TYPE_IQ2_XS:  return 4;
-        case GGML_TYPE_IQ2_XXS: return 4;
+        case GGML_TYPE_IQ2_XXS: return 0; // MMVQ MUL_MAT_ID fails for IQ2_XXS; use fallback path
         case GGML_TYPE_IQ3_S:   return 4;
         case GGML_TYPE_IQ3_XXS: return 4;
         case GGML_TYPE_Q2_K:    return 7;
@@ -195,7 +196,7 @@ static constexpr __host__ __device__ int get_mmvq_mmid_max_batch_rdna3(ggml_type
         case GGML_TYPE_IQ1_M:   return 6;
         case GGML_TYPE_IQ2_S:   return 4;
         case GGML_TYPE_IQ2_XS:  return 4;
-        case GGML_TYPE_IQ2_XXS: return 4;
+        case GGML_TYPE_IQ2_XXS: return 0; // MMVQ MUL_MAT_ID fails for IQ2_XXS; use fallback path
         case GGML_TYPE_IQ3_S:   return 4;
         case GGML_TYPE_IQ3_XXS: return 4;
         case GGML_TYPE_IQ4_NL:  return 6;
@@ -213,7 +214,7 @@ static constexpr __host__ __device__ int get_mmvq_mmid_max_batch_rdna4(ggml_type
         case GGML_TYPE_IQ1_M:   return 7;
         case GGML_TYPE_IQ2_S:   return 4;
         case GGML_TYPE_IQ2_XS:  return 4;
-        case GGML_TYPE_IQ2_XXS: return 4;
+        case GGML_TYPE_IQ2_XXS: return 0; // MMVQ MUL_MAT_ID fails for IQ2_XXS; use fallback path
         case GGML_TYPE_IQ3_S:   return 4;
         case GGML_TYPE_IQ3_XXS: return 4;
         case GGML_TYPE_IQ4_NL:  return 7;
